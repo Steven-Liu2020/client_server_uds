@@ -77,6 +77,7 @@ void *server_thread(void *arg)
         ser_fd = socket(AF_UNIX,SOCK_STREAM,0);
         if (ser_fd < 0)
                 err_log("Server socket() failed");
+        //Set addr reuse
         setsockopt(ser_fd,SOL_SOCKET,SO_REUSEADDR,(void *)&reuse_val,sizeof(reuse_val));
         ret = bind(ser_fd,(struct sockaddr *)&un,sizeof(un));
         if (ret < 0)
@@ -177,7 +178,7 @@ void *client_sync_nonblock(void *arg) //Client Synchronous Non-blocking
         return NULL;
 }
 
-void *client_async_block(void *arg)
+void *client_async_block(void *arg) //Client Asynchronous Blocking
 {
         int fd,ret,recv_bytes,send_bytes;
         struct sockaddr_un ser_addr;
@@ -209,7 +210,7 @@ void *client_async_block(void *arg)
                         err_log("Client3 select() failed");
                 else if(ret == 0)
                         break;
-                else if(FD_ISSET(fd,&readset)){
+                else if(FD_ISSET(fd,&readset)){ 
                         memset(recv_buff,0,sizeof(recv_buff));
                         recv_bytes = recv(fd,recv_buff,BUFFER_SIZE,MSG_DONTWAIT);
                         recv_buff[recv_bytes] = '\0';
@@ -222,13 +223,14 @@ void *client_async_block(void *arg)
         return NULL;
 }
 
-void *client_async_nonblock(void *arg)
+void *client_async_nonblock(void *arg)//Client Asynchronous Non-blocking
 {
         struct aiocb rd,wr;
         struct sigaction sig_act;
         int fd,ret,recv_bytes,send_bytes;
         char recv_buff[BUFFER_SIZE],send_buff[BUFFER_SIZE];
         struct sockaddr_un ser_addr;
+        int i;
 
         memset(&ser_addr,0,sizeof(ser_addr));
         ser_addr.sun_family = AF_UNIX;
@@ -254,17 +256,20 @@ void *client_async_nonblock(void *arg)
         while (aio_error(&wr) == EINPROGRESS);
         ret = aio_return(&wr);
 
-        sigemptyset(&sig_act.sa_mask);
+        sigemptyset(&sig_act.sa_mask);//Set up the signal handler
         sig_act.sa_flags = SA_SIGINFO;
         sig_act.sa_sigaction = aio_completion_handler;
-        memset(&rd,0,sizeof(rd));
+        
+        memset(&rd,0,sizeof(rd)); //Set up the AIO request
         rd.aio_buf = recv_buff;
         rd.aio_fildes = fd;
         rd.aio_nbytes = BUFFER_SIZE;
         rd.aio_offset = 0;
+        //Link the AIO request with the signal handler
         rd.aio_sigevent.sigev_notify = SIGEV_SIGNAL;
         rd.aio_sigevent.sigev_signo = SIGIO;
         rd.aio_sigevent.sigev_value.sival_ptr = &rd;
+        //Map the signal to the signal handler
         ret = sigaction(SIGIO,&sig_act,NULL);
 
         memset(recv_buff,0,sizeof(0));
@@ -274,7 +279,10 @@ void *client_async_nonblock(void *arg)
         //while (aio_error(&rd) == EINPROGRESS);
         //ret = aio_return(&rd);
         //printf("Client recv: %s\n",rd.aio_buf);
-        sleep(3);
+        for (i = 0; i < 5; ++i){
+                printf("sleep...\n");
+                sleep(1);
+        }
         close(fd);
         return NULL;
 }
@@ -282,6 +290,7 @@ void aio_completion_handler(int signo,siginfo_t *info,void *context)
 {
         struct aiocb *req;
         int ret;
+        //Ensure it's our signal
         if(info->si_signo == SIGIO){
                 req = (struct aiocb *)info->si_value.sival_ptr;
                 if(aio_error(req) == 0){
